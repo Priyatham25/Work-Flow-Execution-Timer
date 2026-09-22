@@ -1,0 +1,424 @@
+{
+  "name": "SRE Anomaly Monitor & Autonomous Diagnostics Pipeline",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "7ce912f2-b221-4001-8c0c-0acee1af68dd",
+      "name": "Manual Execution Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -272,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-0001",
+              "name": "latency_sla_ms",
+              "type": "number",
+              "value": 5000
+            },
+            {
+              "id": "cfg-0002",
+              "name": "perf_history_path",
+              "type": "string",
+              "value": "/var/log/sre/telemetry-history.json"
+            },
+            {
+              "id": "cfg-0003",
+              "name": "incident_log_path",
+              "type": "string",
+              "value": "/var/log/sre/incident-alerts.json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "674c91f4-cebc-40e8-a8a7-ccd759e4bb48",
+      "name": "Init Global Thresholds",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -64,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const envConfig = $input.first().json;\nconst epochStart = Date.now();\n\nreturn [{\n  json: {\n    ...envConfig,\n    epochStart,\n    timestampISO: new Date(epochStart).toISOString(),\n    telemetry_markers: [{ marker: 'pipeline_init', timestamp: epochStart, duration: 0 }]\n  }\n}];"
+      },
+      "id": "c553f2b4-7d59-410c-8b2f-e22f3078033e",
+      "name": "Start Latency Tracker",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 1
+      },
+      "id": "6e60ea36-cf8a-476c-b62c-36e6b593db1b",
+      "name": "Job Simulation Stage A",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        384,
+        -16
+      ],
+      "webhookId": "1506978c-a747-4857-96e1-12a244d585f3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const pipelineData = $input.first().json;\nconst currentEpoch = Date.now();\nconst telemetry_markers = [...pipelineData.telemetry_markers, { marker: 'stage_a_resolved', timestamp: currentEpoch, duration: currentEpoch - pipelineData.epochStart }];\nreturn [{ json: { ...pipelineData, telemetry_markers } }];"
+      },
+      "id": "523c374d-eff1-48f1-8804-3ec975d61bed",
+      "name": "Log Stage A Delta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 1.5
+      },
+      "id": "522fd558-cad8-454d-b671-dc0bce8f232a",
+      "name": "Job Simulation Stage B",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        816,
+        -16
+      ],
+      "webhookId": "2886c315-6c85-4671-a44e-9692bbdc54ee"
+    },
+    {
+      "parameters": {
+        "jsCode": "const context = $input.first().json;\nconst epochEnd = Date.now();\nconst totalLatencyMs = epochEnd - context.epochStart;\n\nconst telemetry_markers = [...context.telemetry_markers, { marker: 'pipeline_terminated', timestamp: epochEnd, duration: totalLatencyMs }];\n\nconst analysisReport = {\n  jobName: $workflow.name,\n  jobId: $workflow.id,\n  runId: $execution.id,\n  epochStart: context.epochStart,\n  timestampISO: context.timestampISO,\n  epochEnd,\n  closedAtISO: new Date(epochEnd).toISOString(),\n  totalLatencyMs,\n  runtimeSec: Number((totalLatencyMs / 1000).toFixed(3)),\n  latency_sla_ms: context.latency_sla_ms,\n  perf_history_path: context.perf_history_path,\n  incident_log_path: context.incident_log_path,\n  isSlaViolated: totalLatencyMs > context.latency_sla_ms,\n  telemetry_markers\n};\n\nreturn [{ json: analysisReport }];"
+      },
+      "id": "73adb73f-4889-491c-b249-366ddfcb6822",
+      "name": "Compile Performance Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-slow-1",
+              "leftValue": "={{ $json.isSlaViolated }}",
+              "rightValue": 1,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "26ad6c48-42b4-4c7c-bdf9-4da4697dd8d8",
+      "name": "Check SLA Infraction",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1264,
+        128
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "2046f9d8-f619-44f5-8f18-bc8baefd7888",
+      "name": "End Session (Healthy)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1488,
+        48
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=An operational latency slowdown was detected.\nRun ID: {{ $json.runId }}\nObserved Latency: {{ $json.totalLatencyMs }} ms\nConfigured Target SLA: {{ $json.latency_sla_ms }} ms\n\nQuery historical trends using the telemetry_database_reader, calculate runtime variance relative to baseline performance thresholds, and compose the diagnostics brief.",
+        "options": {
+          "systemMessage": "=You are an Automated Systems Diagnostics Engine responsible for auditing performance pipelines.\n\nOn every run:\n1. Execute 'telemetry_database_reader' to gather runtime statistics from historical sessions.\n2. Analyze past data points to compute an expected performance baseline (mean/median operational latency).\n3. Measure how heavily the current violation ({{ $json.totalLatencyMs }} ms) strays from the established baseline, calculating percentage variance via: ((current - baseline) / baseline) * 100.\n4. Isolate the most probable catalyst for the degradation (e.g. system resource exhaustion, code-level execution overhead, API throttling, thread wait states) using the steps and telemetry data provided.\n5. Output a structured, technical markdown summary utilizing the following exact layout:\n   ## Operational Metrics Summary\n   ## Variance Tracking & Deviations\n   ## Diagnostic Root Cause Isolation\n   ## System Stabilization Instructions\n\nRemain quantitative and clear. Do not invent mock telemetry metrics—if the database returns no historical logs, announce the absence of a reliable baseline and request profile caching."
+        }
+      },
+      "id": "2d0fcd47-b6cd-45cf-a4b4-850d68f4f4d2",
+      "name": "AI Diagnostics Engine",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        1488,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "id": "327edb4c-e285-4266-8a20-39eb37756436",
+      "name": "Groq Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        1408,
+        448
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "OHt7Q9jEZUxRxAAL",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Compile Performance Metrics').item.json.runId }}",
+        "contextWindowLength": 10
+      },
+      "id": "a50c5845-4e1f-4f11-9732-6d675a211f66",
+      "name": "Rolling Context Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1568,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "name": "telemetry_database_reader",
+        "description": "Extract historical logs from disk storage to construct runtime baselines for tracking service regression.",
+        "jsCode": "// No require('fs') needed!\ntry {\n  // Pulls the data read by your upstream \"Read File\" node\n  const metricsPayload = $('Name_Of_Your_Read_File_Node').item.json; \n  \n  if (!metricsPayload) {\n    return 'Historical profiling empty. Unable to formulate base benchmark.';\n  }\n  return JSON.stringify(metricsPayload);\n} catch (err) {\n  return 'Failure accessing telemetry store: ' + err.message;\n}"
+      },
+      "id": "c76ed8a1-060c-4826-8fee-d9ea00426d90",
+      "name": "telemetry_database_reader",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1.1,
+      "position": [
+        1728,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const diagnosticReport = $input.first().json;\nconst workflowMetadata = $('Compile Performance Metrics').first().json;\n\nconst incidentReportPayload = {\n  incidentReportMarkdown: diagnosticReport.output,\n  recordedAt: new Date().toISOString(),\n  runId: workflowMetadata.runId,\n  totalLatencyMs: workflowMetadata.totalLatencyMs,\n  latency_sla_ms: workflowMetadata.latency_sla_ms\n};\n\nconst formattedLogEntry = JSON.stringify(incidentReportPayload) + \"\\n\";\nconst byteBuffer = await this.helpers.prepareBinaryData(Buffer.from(formattedLogEntry, 'utf-8'), 'incident-alerts.json', 'application/json');\n\nreturn [{ json: incidentReportPayload, binary: { data: byteBuffer } }];"
+      },
+      "id": "a8750ca5-2be3-4281-866e-9ea2be197920",
+      "name": "Format Incident File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1952,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "fileSelector": "={{ $json.incident_log_path }}",
+        "options": {}
+      },
+      "id": "6b6271f9-694a-41fe-8f12-abfc3b8c15a2",
+      "name": "Write Incident Alert Log",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        2176,
+        240
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Execution Trigger": {
+      "main": [
+        [
+          {
+            "node": "Init Global Thresholds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init Global Thresholds": {
+      "main": [
+        [
+          {
+            "node": "Start Latency Tracker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Latency Tracker": {
+      "main": [
+        [
+          {
+            "node": "Job Simulation Stage A",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Job Simulation Stage A": {
+      "main": [
+        [
+          {
+            "node": "Log Stage A Delta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Stage A Delta": {
+      "main": [
+        [
+          {
+            "node": "Job Simulation Stage B",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Job Simulation Stage B": {
+      "main": [
+        [
+          {
+            "node": "Compile Performance Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Performance Metrics": {
+      "main": [
+        [
+          {
+            "node": "Check SLA Infraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check SLA Infraction": {
+      "main": [
+        [
+          {
+            "node": "AI Diagnostics Engine",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "End Session (Healthy)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Diagnostics Engine",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rolling Context Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Diagnostics Engine",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "telemetry_database_reader": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Diagnostics Engine",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Diagnostics Engine": {
+      "main": [
+        [
+          {
+            "node": "Format Incident File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Incident File": {
+      "main": [
+        [
+          {
+            "node": "Write Incident Alert Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "fdf4a919-70bc-458c-8e59-f86ffd5df2e9",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b3998f1ae1c47bfa6e010fbeea9d4e4e347d5c89f4db2512e6916637843f0267"
+  },
+  "nodeGroups": [],
+  "id": "PuwP5jUaobDhbJ7B",
+  "tags": []
+}
